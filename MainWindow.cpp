@@ -82,6 +82,7 @@ void QFGraph::drawGraph(double a,double b,double c)
 {
     QCustomPlot *plot=ui->graph;
     QVector<double> x,y;
+    if(a==0) return;
     double vertexX=-b/(2*a);
     double vertexY=(4*a*c-b*b)/(4*a);
     for(double i=vertexX-10000;i<=vertexX+10000;i+=0.01)
