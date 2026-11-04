@@ -50,3 +50,8 @@ compile_commands.json
 
 *.DS_Store
 *.app
+
+# Local Makefile outputs
+/build/
+/dist/
+!/Makefile
