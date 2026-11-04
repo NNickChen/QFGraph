@@ -1,0 +1,76 @@
+name: Build Windows release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Check out v0.1.1
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: v0.1.1
+          persist-credentials: false
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Build and deploy
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          if errorlevel 1 exit /b 1
+          mkdir build
+          cd build
+          qmake ..\QFGraph.pro CONFIG+=release CONFIG-=debug
+          if errorlevel 1 exit /b 1
+          nmake /NOLOGO
+          if errorlevel 1 exit /b 1
+          mkdir ..\package
+          copy release\QFGraph.exe ..\package\QFGraph.exe
+          if errorlevel 1 exit /b 1
+          windeployqt --release --no-translations --no-opengl-sw --no-system-d3d-compiler ..\package\QFGraph.exe
+          if errorlevel 1 exit /b 1
+          copy "%VCToolsRedistDir%x64\Microsoft.VC143.CRT\*.dll" ..\package\
+          if errorlevel 1 exit /b 1
+
+      - name: Check packaged application starts
+        shell: pwsh
+        run: |
+          Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
+          Remove-Item Env:QT_QPA_PLATFORM_PLUGIN_PATH -ErrorAction SilentlyContinue
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $app = Start-Process -FilePath "$pwd\package\QFGraph.exe" -WorkingDirectory "$pwd\package" -PassThru
+          Start-Sleep -Seconds 8
+          if ($app.HasExited) { throw "QFGraph exited unexpectedly: $($app.ExitCode)" }
+          Stop-Process -Id $app.Id
+          Write-Output 'Packaged QFGraph started successfully without Qt on PATH.'
+
+      - name: Package Windows application
+        shell: pwsh
+        run: |
+          @'
+          QFGraph v0.1.1 - Windows x64
+          Extract this entire archive and run QFGraph.exe.
+          Keep all DLLs and subfolders beside the executable.
+          Built from tag v0.1.1 using Qt 6.8.3 and Visual Studio 2022.
+          Corresponding source: https://github.com/NNickChen/QFGraph/tree/v0.1.1
+          QCustomPlot is distributed under the GNU GPL v3 or later; see its source headers.
+          '@ | Set-Content package\README.txt
+          Compress-Archive -Path package\* -DestinationPath QFGraph-Windows-x64.zip
+
+      - name: Upload release asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload v0.1.1 QFGraph-Windows-x64.zip
