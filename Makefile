@@ -1,6 +1,9 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := all
 
+# Persist machine-specific Qt settings without checking paths into git.
+-include config.mk
+
 QT_ROOT ?= $(shell qmake -query QT_INSTALL_PREFIX 2>/dev/null)
 ARCHS ?= arm64 x86_64
 QT_HOST_ARCH ?= $(shell uname -m)
@@ -20,9 +23,12 @@ DEVELOPER := $(shell xcode-select --print-path 2>/dev/null)
 CLANG := $(shell xcrun --find clang 2>/dev/null)
 CLANGXX := $(shell xcrun --find clang++ 2>/dev/null)
 
-.PHONY: all universal check build package verify smoke clean help
+.PHONY: all universal configure check build package verify smoke clean help
 all: package
 universal: package
+
+configure: check
+	@$(PYTHON) scripts/macos.py configure "$(QT_ABS)" "$(QT_HOST_ARCH)"
 
 check:
 	@test "$$(uname -s)" = Darwin || { echo 'This Makefile builds macOS applications. Use the Windows workflow for Windows.'; exit 1; }
@@ -66,6 +72,7 @@ clean:
 	@$(PYTHON) scripts/macos.py clean "$(BUILD_ABS)"
 
 help:
+	@echo 'make configure QT_ROOT=/path/to/Qt          Save local Qt settings once'
 	@echo 'make QT_ROOT=/path/to/Qt/6.8.3/macos         Build and package Universal'
 	@echo 'make QT_ROOT=/path/to/Qt ARCHS=arm64        Build Apple Silicon only'
 	@echo 'make QT_ROOT=/path/to/Qt QT_HOST_ARCH=x86_64  Run Qt tools under Rosetta'

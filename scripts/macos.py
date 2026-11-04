@@ -26,13 +26,29 @@ def binaries(app):
 def architectures(p, wanted):
     actual = set(run('lipo', '-archs', str(p)).split())
     if not set(wanted) <= actual:
-        raise RuntimeError(f'{p}: requires {wanted}, contains {sorted(actual)}')
+        raise RuntimeError(f'{p}: requires {wanted}, contains {sorted(actual)}. '
+                           'For Universal, select a Qt installation with arm64 and x86_64: '
+                           'make configure QT_ROOT=/path/to/universal/Qt')
 
 
 def check(qt, *archs):
     if not archs or set(archs) - {'arm64', 'x86_64'}:
         raise RuntimeError('ARCHS must contain arm64 and/or x86_64.')
     architectures(Path(qt) / 'lib/QtCore.framework/Versions/A/QtCore', archs)
+
+
+def configure(qt, host):
+    if host not in {'arm64', 'x86_64'}:
+        raise RuntimeError('QT_HOST_ARCH must be arm64 or x86_64.')
+    # Check that this host architecture can execute the selected Qt tool.
+    subprocess.run(['arch', '-' + host, str(Path(qt) / 'bin/qmake'), '-v'], check=True)
+    qt = str(Path(qt).resolve()).replace('$', '$$').replace('#', '\\#')
+    if '\n' in qt or '\r' in qt:
+        raise RuntimeError('Qt path cannot contain newlines.')
+    Path('config.mk').write_text(
+        '# Local machine settings; ignored by git. Command-line values override these.\n'
+        f'QT_ROOT := {qt}\nQT_HOST_ARCH := {host}\n')
+    print('Saved config.mk. You can now run make without Qt arguments.')
 
 
 def tools(qt, directory, host):
@@ -127,7 +143,7 @@ def clean(directory):
 
 
 if __name__ == '__main__':
-    commands = {f.__name__: f for f in (check, tools, sdk, copy, verify, smoke, clean)}
+    commands = {f.__name__: f for f in (configure, check, tools, sdk, copy, verify, smoke, clean)}
     try:
         commands[sys.argv[1]](*sys.argv[2:])
     except (RuntimeError, subprocess.CalledProcessError) as error:

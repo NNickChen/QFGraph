@@ -9,10 +9,15 @@
 仅包含 arm64 的 Homebrew Qt 不能用于生成完整的 Universal 包。
 
 ```sh
-make QT_ROOT=/path/to/Qt/6.8.3/macos
+make configure QT_ROOT=/path/to/Qt/6.8.3/macos
+make
 ```
 
 `QT_ROOT` 指向包含 `bin/qmake`、`lib` 和 `plugins` 的目录，具体目录名以实际安装为准。
+首次配置会将路径和 Qt 工具运行架构保存到 git 忽略的 `config.mk`；之后直接运行 `make`。
+未配置时才会尝试使用 PATH 中的 qmake。如果它指向仅有 arm64 的 Homebrew Qt，
+默认 Universal 构建会报架构不匹配，需要先选择双架构 Qt，不能仅靠运行 `make` 补齐依赖。
+需要 Rosetta 时，配置命令中加上 `QT_HOST_ARCH=x86_64`。
 构建会生成主程序、收集 Qt 运行依赖、检查所有二进制架构及依赖完整性、
 添加本地临时签名，并生成：
 
