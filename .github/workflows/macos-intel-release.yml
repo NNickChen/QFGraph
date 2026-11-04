@@ -1,0 +1,90 @@
+name: Build Intel Mac release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos-intel:
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - name: Check out v0.1.1
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: v0.1.1
+          persist-credentials: false
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4
+        with:
+          version: '6.8.3'
+          arch: clang_64
+          cache: true
+
+      - name: Build and deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          mkdir build
+          cd build
+          qmake ../QFGraph.pro CONFIG+=release CONFIG-=debug QMAKE_APPLE_DEVICE_ARCHS=x86_64 QMAKE_MACOSX_DEPLOYMENT_TARGET=12.0
+          make -j3
+          macdeployqt QFGraph.app -libpath="$QT_ROOT_DIR/lib"
+
+      - name: Keep Intel architecture and sign bundle
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+
+          app = Path('build/QFGraph.app')
+          for path in app.rglob('*'):
+              if path.is_symlink() or not path.is_file():
+                  continue
+              description = subprocess.check_output(['file', '-b', str(path)], text=True)
+              if 'Mach-O' not in description:
+                  continue
+              archs = subprocess.check_output(['lipo', '-archs', str(path)], text=True).split()
+              if 'x86_64' not in archs:
+                  raise RuntimeError(f'Non-Intel dependency: {path}: {archs}')
+              if len(archs) > 1:
+                  thin = path.with_name(path.name + '.intel')
+                  subprocess.run(['lipo', str(path), '-thin', 'x86_64', '-output', str(thin)], check=True)
+                  shutil.copystat(path, thin)
+                  os.replace(thin, path)
+          subprocess.run(['codesign', '--force', '--deep', '--sign', '-', str(app)], check=True)
+          subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
+
+      - name: Check packaged application starts
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+
+          exe = Path('build/QFGraph.app/Contents/MacOS/QFGraph').resolve()
+          env = {k: v for k, v in os.environ.items() if not k.startswith(('QT_', 'DYLD_'))}
+          env['PATH'] = '/usr/bin:/bin:/usr/sbin:/sbin'
+          proc = subprocess.Popen([str(exe)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+          try:
+              out, err = proc.communicate(timeout=8)
+              raise RuntimeError(f'Unexpected exit {proc.returncode}: {err.decode(errors="replace")}')
+          except subprocess.TimeoutExpired:
+              proc.terminate()
+              proc.communicate(timeout=10)
+              print('Intel application initialized successfully without Qt on PATH.')
+
+      - name: Package application
+        run: ditto -c -k --sequesterRsrc --keepParent build/QFGraph.app QFGraph-macOS-x86_64.zip
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload v0.1.1 QFGraph-macOS-x86_64.zip
